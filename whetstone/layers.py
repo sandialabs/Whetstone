@@ -1,0 +1,215 @@
+"""
+Copyright 2018 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
+
+This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation version 3 of the License only.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+from __future__ import absolute_import
+
+from keras.layers import Layer
+import keras.backend as K
+import random as rn
+import numpy as np
+import math
+
+
+# If you add a new custom layer, it also needs to be added to the dictionary at the bottom of this file.
+
+class Spiking(Layer):
+    """Abstract base layer for all spiking activation Layers.
+
+    This layer should not be instantiated, but rather inherited.
+
+    # Arguments
+        sharpness: Float, abstract 'sharpness' of the activation.
+            Setting sharpness to 0.0 leaves the activation function unmodified.
+            Setting sharpness to 1.0 sets the activation function to a threshold gate
+            with the step generally occuring at x = 0.5
+    """
+    sharpen_start_limit = 0.0
+    sharpen_end_limit = 1.0
+
+    def __init__(self, sharpness=0.0, **kwargs):
+        super(Spiking, self).__init__(**kwargs)
+        self.supports_masking = True
+        self.sharpness = K.variable(K.cast_to_floatx(sharpness))
+
+    def build(self, input_shape):
+        super(Spiking, self).build(input_shape)
+
+    def sharpen(self, amount=0.01):
+        """Sharpens the activation function by the specified amount.
+
+        # Arguments
+            amount: Float, the amount to sharpen.
+        """
+        K.set_value(self.sharpness, min(max(K.get_value(self.sharpness)+amount, Spiking.sharpen_start_limit), Spiking.sharpen_end_limit))
+
+    def get_config(self):
+        """ Provides configuration info so model can be saved and loaded.
+
+        # Returns
+            A dictionary of the layer's configuration.
+        """
+        config = {'sharpness':K.get_value(self.sharpness)} # TODO Find canonical way to do this.
+        base_config = super(Spiking, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class Spiking_BRelu(Spiking):
+    """ A Bounded Rectified Linear Unit layer that can be sharpened to a threshold gate.
+    """
+    def __init__(self, **kwargs):
+        super(Spiking_BRelu, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        super(Spiking_BRelu, self).build(input_shape)
+
+    def call(self, inputs):
+        step_function = K.cast(K.greater_equal(inputs, 0.5), K.floatx())
+        width = 1.001-self.sharpness
+        pbrelu = K.clip((1.0/width)*(inputs-0.5)+0.5, 0.0, 1.0)
+        return K.switch(K.equal(self.sharpness, 1.0), step_function, pbrelu)
+
+    def get_config(self):
+        base_config = super(Spiking_BRelu, self).get_config()
+        return dict(list(base_config.items()))
+
+
+class Spiking_Sigmoid(Spiking):
+    """ A Sigmoid layer that can be sharpened to a threshold gate.
+    """
+    def __init__(self, **kwargs):
+        super(Spiking_Sigmoid, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        super(Spiking_Sigmoid, self).build(input_shape)
+
+    def call(self, inputs):
+        step_function = K.cast(K.greater_equal(inputs, 0.0), K.floatx())
+        width = 1.001-self.sharpness
+        k = (4.0*math.log(2.0+3.0**0.5))/width
+        psigmoid = 1.0/(1.0+K.exp(K.clip(-(inputs)*k, -40, 40)))
+        return K.switch(K.equal(self.sharpness, 1.0), step_function, psigmoid)
+
+    def get_config(self):
+        base_config = super(Spiking_Sigmoid, self).get_config()
+        return dict(list(base_config.items()))
+
+
+class Softmax_Decode(Layer):
+    """ A layer which uses a key to decode a sparse representation into a softmax.
+
+    Makes it easier to train spiking classifiers by allowing the use of
+    softmax and catagorical-crossentropy loss. Allows for encodings that are many-hot
+    and also encodings with overlap where a given output neuron can contribute to the
+    probability of more than one class.
+
+    # Arguments
+        key: A numpy array (num_classes, input_dims) with an input_dim-sized
+            {0,1}-vector representative for each class.
+        size: A tuple (num_classes, input_dim).  If ``key`` is not specified, then
+            size must be specified.  In which case, a key will automatically be generated.
+    """
+    def __init__(self, key=None, size=None, **kwargs):
+        super(Softmax_Decode, self).__init__(**kwargs)
+        self.key = _key_check(key, size)
+        if type(self.key) is dict and 'value' in self.key.keys():
+            self.key = np.array(self.key['value'], dtype=np.float32)
+        self._rescaled_key = K.variable(np.transpose(2*self.key-1))
+
+    def build(self, input_shape):
+        super(Softmax_Decode, self).build(input_shape)
+
+    def call(self, inputs):
+        return K.softmax(K.dot(2*(1-inputs),self._rescaled_key))
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0],self.key.shape[0])
+
+    def get_config(self):
+        base_config = super(Softmax_Decode, self).get_config()
+        return dict(list(base_config.items()) + [('key', self.key)])
+
+
+def _key_check(key, size):
+    if(key is None):
+        if(size is not None):
+            return key_generator(size[0], size[1])
+        else:
+            raise ValueError("You must specifiy a key or a size tuple.")
+    else:
+        return key
+
+
+def key_generator(num_classes, width, sparsity = 0.1, overlapping=True):
+    """ Generates a key to encode and decode a one-hot vector into a sparse {0,1}-vector.
+
+    # Arguments
+        num_classes: Integer, number of classes represented by the one-hot vector.
+        width: Integer, dimensionality of the expansion
+        sparsity: Float, approximate ratio of 1's to 0's in the encoded vectors.
+        overlapping: Boolean, if ``False``, the encoded vectors are assured to
+            be linearly independent.
+
+    # Returns
+        An ndarray of size (num_classes, width)
+    """
+    key = np.zeros((num_classes, width))
+    validIdx = list(range(0,width))
+    entries_per_class = width//num_classes
+    for i in range(0, num_classes):
+        row_idx = np.random.choice(validIdx,entries_per_class, replace=False)
+        key[i, row_idx] = 1
+        if(not overlapping):
+            for idx in row_idx:
+                validIdx.remove(idx)
+    return key
+
+
+class Spiking_Loss(Layer):
+    """ OMIT FROM RELEASE
+    This layer generates a loss function based on categorical_crossentropy.
+    The loss layer should be placed on top of an output layer.
+    Use ``lambda x : x`` a as the loss function in keras.
+
+    This is to be removed in favor for Softmax_Decode
+
+    Parameters
+    -----------------
+    key : A numpy array (num_classes, input_dims) with an input_dim-sized
+    {0,1}-vector representative for each class.
+    size : A tuple (num_classes, input_dims).  If `key`` is not specified, then
+    size must be specified.  In which case, a key will automatically be generated.
+    """
+    def __init__(self, key=None, size=None, **kwargs):
+        super(Spiking_Loss, self).__init__(**kwargs)
+        self.key = _key_check(key, size)
+        self._rescaled_key = K.variable(np.transpose(2*self.key-1))
+
+    def build(self, input_shape):
+        super(Spiking_Loss, self).build(input_shape)
+        if not isinstance(input_shape, list):
+            raise ValueError('Layer should be called on a list of two inputs: one is the prediction, the other is the ground truth')
+
+    def call(self, inputs):
+        return K.categorical_crossentropy(K.softmax(K.dot( 2*1-inputs[0],self._rescaled_key)), inputs[1])
+
+    def get_config(self):
+        base_config = super(Spiking_loss, self).get_config()
+        return dict(list(base_config.items()) + {'key': key})
+
+
+whetstoneLayersDictionary = {'Spiking_BRelu':Spiking_BRelu,
+                             'Spiking_Sigmoid':Spiking_Sigmoid,
+                             'Softmax_Decode':Softmax_Decode}
