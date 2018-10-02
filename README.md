@@ -48,6 +48,11 @@ Some example scripts require
 - opencv-python 3.4.1.15
 - Keras-rl 0.4.2
 
+-------
+Documentation
+-------
+Documentation is available at [docs](../docs).
+
 ------
 Example
 ------
