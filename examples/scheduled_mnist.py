@@ -1,18 +1,3 @@
-# Copyright 2018 National Technology & Engineering Solutions of Sandia, LLC (NTESS).
-# Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation version 3 of the License only.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 from __future__ import print_function
 
 """
@@ -30,7 +15,7 @@ from keras.utils import to_categorical
 from keras.layers import Dense, Conv2D, Reshape, Flatten, MaxPooling2D, BatchNormalization
 from keras.optimizers import Adadelta
 from whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
-from whetstone.utils.utils import copy_remove_batchnorm
+from whetstone.utils import copy_remove_batchnorm
 from whetstone.callbacks import ScheduledSharpener
 
 numClasses = 10
@@ -83,7 +68,9 @@ model.add(BatchNormalization())
 model.add(Spiking_BRelu())
 model.add(Softmax_Decode(key))
 
-scheduled = ScheduledSharpener(schedule=[(30,34),(36,40),(42,46),(48,52),(54,58),(60,64),(66,70),(72,76)])
+scheduled = ScheduledSharpener(num_layers=8, start=30, duration=4, intermission=2)
+# Alternatively, the schedule can be specified manually as seen in the line below:
+#scheduled = ScheduledSharpener(schedule=[(30,34),(36,40),(42,46),(48,52),(54,58),(60,64),(66,70),(72,76)])
 
 model.compile(loss='categorical_crossentropy', optimizer=Adadelta(lr=4.0, rho=0.95, epsilon=1e-8, decay=0.0), metrics=['accuracy'])
 model.fit(x_train, y_train, epochs=77, callbacks=[scheduled])
@@ -91,7 +78,9 @@ model.fit(x_train, y_train, epochs=77, callbacks=[scheduled])
 new_model = copy_remove_batchnorm(model)
 # Test both the original and the "copy" and compare their accuracy.
 score = model.evaluate(x_test, y_test)[1]
-score_new = model.evaluate(x_test, y_test)[1]
+score_new = new_model.evaluate(x_test, y_test)[1]
 print('score with batchnorm           =', score)
 print('score after removing batchnorm =', score_new)
 print('They should be the same.')
+
+
