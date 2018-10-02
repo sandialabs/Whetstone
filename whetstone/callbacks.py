@@ -1,18 +1,3 @@
-# Copyright 2018 National Technology & Engineering Solutions of Sandia, LLC (NTESS).
-# Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation version 3 of the License only.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 from __future__ import absolute_import
 from __future__ import print_function
 
@@ -22,7 +7,7 @@ import numpy as np
 import keras.backend as K
 from keras.callbacks import Callback
 from .layers import Spiking
-from .utils.utils import get_spiking_layer_indices, set_layer_sharpness, set_model_sharpness
+from .utils.layer_utils import get_spiking_layer_indices, set_layer_sharpness, set_model_sharpness
 import os, sys, json, pickle, copy, time
 
 
@@ -30,7 +15,7 @@ class Sharpener(Callback):
     """Absract base class used for different sharpening callbacks.
 
     # Arguments
-        bottom_up: Boolean, if ``True``, sharpens one layer at a time,
+        bottom_up: Boolean, if ``True``, sharpens one layer at a time, 
             sequentially, starting with the first. If ``False``, sharpens all layers uniformly.
         verbose: Boolean, if ``True``, prints status updates during training.
     """
@@ -67,7 +52,7 @@ class Sharpener(Callback):
         """Sets the sharpness values of all spiking layers.
 
         # Arguments
-            values: A list of sharpness values (between 0.0 and 1.0 inclusive) for each
+            values: A list of sharpness values (between 0.0 and 1.0 inclusive) for each 
                 spiking layer in the same order as their indices.
         """
         set_layer_sharpness(model=self.model, values=values)
@@ -99,7 +84,7 @@ class SimpleSharpener(Sharpener):
         assert type(epochs) is bool
         self.epochs = epochs
         self.start_epoch = start_epoch
-        self.steps = steps
+        self.steps = steps 
 
     def get_config(self):
         config = {'epochs':self.epochs, 'start_epoch':self.start_epoch, 'steps':self.steps}
@@ -135,23 +120,33 @@ class SimpleSharpener(Sharpener):
 class ScheduledSharpener(Sharpener):
     """Sharpens each layer according to a manually defined schedule.
 
-    Takes a sharpening schedule as input and gradually sharpens on each batch by
+    Takes a sharpening schedule as input and gradually sharpens on each batch by 
     the appropriate amount, as automatically calculated, such that each layer begins
     and ends sharpening as specified in the schedule. Note: The first epoch is not allowed
     to perform any sharpening. This is because we need to know the number of batches per epoch.
 
+    If schedule isn't passed, then num_layers, start, duration, and intermission must be supplied.
+    These will be used to generate a schedule (see gen_schedule method).
+
     # Arguments
-        schedule: List of tuples of the form [(start_epoch, stop_epoch), (start_epoch, stop_epoch), ...]
-            specifying for which epoch to to begin and end sharpening for each spiking layer, where the
+        schedule: List of tuples of the form [(start_epoch, stop_epoch), (start_epoch, stop_epoch), ...] 
+            specifying for which epoch to to begin and end sharpening for each spiking layer, where the 
             sharpening schedule for the ith spiking layer would be the ith tuple in the list.
             Note that the first epoch is 0, not 1.
+        num_layers: Integer, number of sharpenable layers in the model.
+        start: Integer, epoch number on which to begin sharpening.
+        duration: Integer, number of epochs over which to sharpen each layer.
+        intermission: Integer, number of epochs to halt sharpening between layers.
     """
-    def __init__(self, schedule, **kwargs):
+    def __init__(self, schedule=None, num_layers=None, start=None, duration=None, intermission=None, **kwargs):
         super(ScheduledSharpener, self).__init__(**kwargs)
-        assert type(schedule) is list
-        assert all([type(st) is int and type(sp) is int for (st, sp) in schedule])
-        assert all([(sp - st) > 0 for (st, sp) in schedule])
-        assert all([sp > 0 and st > 0 for (st, sp) in schedule])
+        if schedule is None:
+            schedule = self.gen_schedule(num_layers, start, duration, intermission)
+        else:
+            assert type(schedule) is list
+            assert all([type(st) is int and type(sp) is int for (st, sp) in schedule])
+            assert all([(sp - st) > 0 for (st, sp) in schedule])
+            assert all([sp > 0 and st > 0 for (st, sp) in schedule])
         self.schedule = schedule
         self.batch = 0
         try:
@@ -159,6 +154,32 @@ class ScheduledSharpener(Sharpener):
         except:
             pass
 
+    def gen_schedule(self, num_layers, start, duration, intermission):
+        """Generates a sharpening schedule for use with ScheduledSharpener.
+
+        # Arguments
+            num_layers: Integer, number of sharpenable layers in the model.
+            start: Integer, epoch number on which to begin sharpening.
+            duration: Integer, number of epochs over which to sharpen each layer.
+            intermission: Integer, number of epochs to halt sharpening between layers.
+
+        # Returns
+            List of tuples of the form [(start_epoch, stop_epoch), (start_epoch, stop_epoch), ...]
+            specifying for which epoch to to begin and end sharpening for each spiking layer, where the
+            sharpening schedule for the ith spiking layer would be the ith tuple in the list.
+        """
+        assert type(num_layers) is int and num_layers > 0
+        assert type(start) is int and start > 0
+        assert type(duration) is int and duration >= 1
+        assert type(intermission) is int and intermission >= 0
+        current_epoch = start+duration
+        schedule = [(start, current_epoch)]
+        for i in range(num_layers-1):
+            current_epoch += intermission
+            schedule.append((current_epoch, current_epoch+duration))
+            current_epoch += duration
+        return schedule
+        
     def get_config(self):
         config = {'schedule':self.schedule}
         try:
@@ -222,7 +243,7 @@ class RLSharpener(Sharpener):
 
     def on_train_begin(self, logs=None):
         super(RLSharpener, self).on_train_begin()
-
+    
     def on_episode_end(self, episode, logs):
         # {'episode_reward': 108.0, 'nb_steps': 6402, 'nb_episode_steps': 108}
         self.episode = episode
@@ -251,14 +272,14 @@ class AdaptiveSharpener(Sharpener):
         sig_increase: Float, percent increase in loss considered significant.
         sig_decrease: Float, percent decrease in loss considered significant.
     """
-    def __init__(self, min_init_epochs=10,
-                 rate=0.25,
-                 cz_rate=0.126,
-                 critical=0.75,
-                 first_layer_relative_rate=1.0,
-                 patience=1,
-                 sig_increase=0.15,
-                 sig_decrease=0.15,
+    def __init__(self, min_init_epochs=10, 
+                 rate=0.25, 
+                 cz_rate=0.126, 
+                 critical=0.75, 
+                 first_layer_relative_rate=1.0, 
+                 patience=1, 
+                 sig_increase=0.15, 
+                 sig_decrease=0.15, 
                  **kwargs):
         super(AdaptiveSharpener, self).__init__(**kwargs)
         assert type(min_init_epochs) is int and min_init_epochs >= 1
@@ -283,8 +304,8 @@ class AdaptiveSharpener(Sharpener):
             pass
 
     def get_config(self):
-        config = {'min_init_epochs':self.min_init_epochs,
-                  'rate':self.rate,
+        config = {'min_init_epochs':self.min_init_epochs, 
+                  'rate':self.rate, 
                   'cz_rate':self.cz_rate,
                   'critical':self.critical,
                   'first_layer_relative_rate':self.first_layer_relative_rate,
@@ -295,7 +316,7 @@ class AdaptiveSharpener(Sharpener):
         try:
             config['batches_per_epoch'] = self.batches_per_epoch
         except:
-            pass
+            pass 
         base_config = super(AdaptiveSharpener, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
@@ -307,7 +328,7 @@ class AdaptiveSharpener(Sharpener):
         self.batch = 0
         self.batches_per_epoch = None
         self.wait = False
-
+        
     def _perform_sharpening(self, logs=None):
         unfinished_layers = [idx for idx, s in enumerate(self.sharpness) if s < 1.0]
         if len(unfinished_layers) > 0:
@@ -371,8 +392,8 @@ class AdaptiveSharpener(Sharpener):
             print('\nloss =', logs['loss'])
             print('current_reference_loss =', self.reference_loss)
             print('percent_change =', percent_change)
-            print('improved =', improved, 'degraded =', degraded)
-            print('epochs_not_improved =', self.epochs_no_improvement)
+            print('improved =', improved, 'degraded =', degraded) 
+            print('epochs_not_improved =', self.epochs_no_improvement) 
             print('sharpening =', self.sharpening)
             print('sharpness =', [round(i, 4) for i in self.sharpness])
 
@@ -384,22 +405,22 @@ class AdaptiveSharpener(Sharpener):
 
 class WhetstoneLogger(Callback):
     """Keras callback that handles logging (not a type of beer).
-
+       
        Automatically creates a separate subfolder for each epoch.
 
     # Arguments
         logdir: Directory in which to log results.
-        sharpener: Reference to callback of type ``Sharpener``.
+        sharpener: Reference to callback of type ``Sharpener``. 
             If passed, metadata from the sharpener will be recorded.
         test_set: Test set tuple in form (x_test, y_test).
-            If passed, test set accuracy will be evaluated on current and
+            If passed, test set accuracy will be evaluated on current and 
             fully-sharpened versions of the net at the end of each epoch.
-        log_weights: Boolean, if ``True``, logs weights of the entire net at the end of
+        log_weights: Boolean, if ``True``, logs weights of the entire net at the end of 
             each epoch.
     """
-    def __init__(self, logdir,
-                 sharpener=None,
-                 test_set=None,
+    def __init__(self, logdir, 
+                 sharpener=None, 
+                 test_set=None, 
                  log_weights=False):
         super(Callback, self).__init__()
         assert os.path.exists(logdir) and os.path.isdir(logdir)
@@ -450,3 +471,5 @@ class WhetstoneLogger(Callback):
             json.dump(logs_, f, indent=4)
         if self.log_weights:
             self.model.save(os.path.join(epoch_path, 'model_epoch_'+str(epoch)+'.h5'))
+
+
