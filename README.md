@@ -1,3 +1,18 @@
+# Copyright 2018 National Technology & Engineering Solutions of Sandia, LLC (NTESS).
+# Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation version 3 of the License only.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 Whetstone
 =========
 
@@ -11,9 +26,9 @@ Before an initial release, you must clone the git repo and install the package m
 
 The easiest way to this is:
 1. Find a location where you have write permissions and would like a copy of the Whetstone package.
-2. (Internal) `git clone --branch master https://gitlab.sandia.gov/nerl/Whetstone.git`
-This will create a new sub-directory called Whetstone which will contain all the relevant code. OR
-(External) Extract source files from the archive to a new directory.
+2. `git clone --branch master
+https://github.com/SNL-NERL/Whetstone.git`
+This will create a new sub-directory called Whetstone which will contain all the relevant code.
 3. In the new directory, run `pip install .` to install the package.
 
 Typical install requires less than 1 minute.
@@ -33,7 +48,7 @@ Average runtime varies wildly depending on system setup, dataset, and network co
 Dependencies
 -------
 
-- Keras 2.2.2
+- Keras 2.1.2
 - Tensorflow 1.3.0
 - Numpy 1.14.5
 
