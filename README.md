@@ -51,7 +51,7 @@ Some example scripts require
 -------
 Documentation
 -------
-Documentation is available at [docs](https://snl-nerl.github.io/Whetstone/docs/).
+Documentation is available at [docs](/docs/index.md).
 
 ------
 Example
