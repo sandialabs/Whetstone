@@ -92,4 +92,4 @@ network for classifying mnist.:
 
    print(model.evaluate(x_test,y_test))
 ```
-For more information, see Getting Started.
+For more information, see [Getting Started](getting_started.md).
