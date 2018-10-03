@@ -1,5 +1,5 @@
 # Callbacks
-*********
+
 
 ### `class whetstone.callbacks.AdaptiveSharpener(min_init_epochs=10, rate=0.25, cz_rate=0.126, critical=0.75, first_layer_relative_rate=1.0, patience=1, sig_increase=0.15, sig_decrease=0.15, **kwargs)`
 
