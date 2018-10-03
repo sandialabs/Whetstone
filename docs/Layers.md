@@ -1,5 +1,5 @@
 # Layers
-**********
+
 
 ## `class whetstone.layers.Softmax_Decode(key=None, size=None, **kwargs)`
 
